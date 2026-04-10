@@ -1,0 +1,69 @@
+{
+  "platform": "ComfyUI",
+  "models": [
+    {
+      "model_name": "comfyui_flux",
+      "asset_type": "图片",
+      "description": "Flux 图片生成（本地 ComfyUI）",
+      "params_schema": {
+        "ratio": {
+          "type": "select",
+          "options": ["1:1", "4:3", "16:9", "9:16", "3:4"],
+          "default": "1:1"
+        },
+        "resolution": {
+          "type": "select",
+          "options": ["512x512", "768x768", "1024x1024", "1920x1080", "1080x1920"],
+          "default": "1024x1024"
+        },
+        "batch_size": {
+          "type": "number",
+          "min": 1,
+          "max": 8,
+          "default": 1
+        },
+        "steps": {
+          "type": "number",
+          "min": 10,
+          "max": 50,
+          "default": 20
+        },
+        "cfg_scale": {
+          "type": "number",
+          "min": 1,
+          "max": 20,
+          "default": 7
+        }
+      }
+    },
+    {
+      "model_name": "comfyui_multiview",
+      "asset_type": "图片",
+      "description": "多视图角色生成（本地 ComfyUI）",
+      "params_schema": {
+        "ratio": {
+          "type": "select",
+          "options": ["16:9", "4:3", "1:1"],
+          "default": "16:9"
+        },
+        "resolution": {
+          "type": "select",
+          "options": ["1024x768", "1920x1080", "2048x1024"],
+          "default": "1920x1080"
+        },
+        "batch_size": {
+          "type": "number",
+          "min": 1,
+          "max": 4,
+          "default": 1
+        },
+        "steps": {
+          "type": "number",
+          "min": 10,
+          "max": 50,
+          "default": 25
+        }
+      }
+    }
+  ]
+}

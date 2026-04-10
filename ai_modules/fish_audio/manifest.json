@@ -1,0 +1,47 @@
+{
+  "platform": "Fish Audio",
+  "models": [
+    {
+      "model_name": "fish_audio_tts",
+      "asset_type": "音频",
+      "description": "Fish Audio TTS 文字转语音",
+      "params_schema": {
+        "speed": {
+          "type": "number",
+          "min": 0.5,
+          "max": 2.0,
+          "default": 1.0
+        },
+        "pitch": {
+          "type": "number",
+          "min": 0.5,
+          "max": 2.0,
+          "default": 1.0
+        },
+        "volume": {
+          "type": "number",
+          "min": 0.1,
+          "max": 2.0,
+          "default": 1.0
+        },
+        "format": {
+          "type": "select",
+          "options": ["mp3", "wav", "ogg"],
+          "default": "mp3"
+        }
+      }
+    },
+    {
+      "model_name": "fish_audio_clone",
+      "asset_type": "音色卡",
+      "description": "Fish Audio 音色克隆",
+      "params_schema": {
+        "language": {
+          "type": "select",
+          "options": ["zh", "en", "ja", "ko"],
+          "default": "zh"
+        }
+      }
+    }
+  ]
+}

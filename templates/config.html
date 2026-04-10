@@ -1,0 +1,218 @@
+{% extends "base.html" %}
+{% block title %}剧本配置 — {{ current_project }}{% endblock %}
+
+{% block content %}
+<div x-data="configPage()" x-init="init()">
+  <div class="max-w-4xl mx-auto">
+    <div class="flex items-center justify-between mb-6">
+      <div>
+        <h1 class="text-2xl font-bold text-gray-900">剧本配置</h1>
+        <p class="text-sm text-gray-500 mt-1">项目：<strong>{{ current_project }}</strong></p>
+      </div>
+      <button @click="saveConfig()"
+              class="px-5 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 transition-colors">
+        保存配置
+      </button>
+    </div>
+
+    <!-- 基础设置 -->
+    <div class="bg-white rounded-xl border border-gray-200 p-5 mb-5 shadow-sm">
+      <h2 class="font-semibold text-gray-800 mb-4">基础设置</h2>
+      <div class="grid grid-cols-2 gap-4">
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">工作流</label>
+          <select x-model="config.workflow" @change="onWorkflowChange()"
+                  class="w-full px-3 py-2 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-indigo-300 text-sm">
+            {% for wf in workflows %}
+            <option value="{{ wf }}" {% if wf == project_config.get('workflow') %}selected{% endif %}>{{ wf }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">全局并发线程数</label>
+          <input x-model.number="config.global_thread_limit" type="number" min="1" max="20"
+                 class="w-full px-3 py-2 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-indigo-300 text-sm">
+        </div>
+      </div>
+    </div>
+
+    <!-- 各表/槽位默认配置 -->
+    <template x-for="(tableConf, tableName) in workflowTables" :key="tableName">
+      <div class="bg-white rounded-xl border border-gray-200 p-5 mb-5 shadow-sm">
+        <h2 class="font-semibold text-gray-800 mb-4" x-text="tableName + ' 表默认配置'"></h2>
+
+        <template x-for="(slotDef, slotName) in tableConf.slots" :key="slotName">
+          <div class="mb-6 last:mb-0">
+            <div class="flex items-center gap-2 mb-3">
+              <div class="w-2 h-2 rounded-full bg-indigo-400"></div>
+              <h3 class="font-medium text-gray-700" x-text="slotName"></h3>
+              <span class="text-xs px-2 py-0.5 bg-gray-100 text-gray-500 rounded-full"
+                    x-text="slotDef.asset_type"></span>
+            </div>
+            <div class="ml-4 grid grid-cols-1 gap-3">
+              <!-- 模型选择 -->
+              <div>
+                <label class="block text-xs text-gray-500 mb-1">默认模型</label>
+                <select :x-model="`config.defaults.${tableName}.${slotName}.model_name`"
+                        @change="val => setDefault(tableName, slotName, 'model_name', $event.target.value)"
+                        class="w-full px-3 py-2 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-indigo-300 text-sm">
+                  <option value="">— 不设默认 —</option>
+                  <template x-for="m in getModelsForType(slotDef.asset_type)" :key="m.model_name">
+                    <option :value="m.model_name"
+                            :selected="getDefault(tableName, slotName, 'model_name') === m.model_name"
+                            x-text="`${m.model_name} (${m.platform})`"></option>
+                  </template>
+                </select>
+              </div>
+              <!-- 提示词默认值 -->
+              <template x-for="seg in (slotDef.prompt_template || [])" :key="Object.keys(seg)[0]">
+                <div>
+                  <label class="block text-xs text-gray-500 mb-1" x-text="Object.keys(seg)[0] + ' (默认值)'"></label>
+                  <input type="text"
+                         :value="getPromptDefault(tableName, slotName, Object.keys(seg)[0])"
+                         @input="setPromptDefault(tableName, slotName, Object.keys(seg)[0], $event.target.value)"
+                         class="w-full px-3 py-2 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-indigo-300 text-sm"
+                         :placeholder="Object.values(seg)[0] || '留空则无默认值'">
+                </div>
+              </template>
+              <!-- 生成参数（根据所选模型动态渲染） -->
+              <div x-show="getDefault(tableName, slotName, 'model_name')">
+                <label class="block text-xs text-gray-500 mb-2">生成参数</label>
+                <div class="grid grid-cols-2 gap-2">
+                  <template x-for="(schema, param) in getParamsSchema(tableName, slotName)" :key="param">
+                    <div>
+                      <label class="block text-xs text-gray-400 mb-0.5" x-text="param"></label>
+                      <select x-show="schema.type==='select'"
+                              :value="getGenConfig(tableName, slotName, param, schema.default)"
+                              @change="setGenConfig(tableName, slotName, param, $event.target.value)"
+                              class="w-full px-2 py-1.5 rounded border border-gray-300 text-xs focus:outline-none focus:ring-1 focus:ring-indigo-300">
+                        <template x-for="opt in (schema.options||[])" :key="opt">
+                          <option :value="opt" x-text="opt"
+                                  :selected="getGenConfig(tableName, slotName, param, schema.default)==opt"></option>
+                        </template>
+                      </select>
+                      <input x-show="schema.type==='number'" type="number"
+                             :min="schema.min" :max="schema.max"
+                             :value="getGenConfig(tableName, slotName, param, schema.default)"
+                             @input="setGenConfig(tableName, slotName, param, parseFloat($event.target.value))"
+                             class="w-full px-2 py-1.5 rounded border border-gray-300 text-xs focus:outline-none focus:ring-1 focus:ring-indigo-300">
+                    </div>
+                  </template>
+                </div>
+              </div>
+            </div>
+          </div>
+        </template>
+      </div>
+    </template>
+
+    <div class="flex justify-end">
+      <button @click="saveConfig()"
+              class="px-6 py-2.5 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 transition-colors">
+        保存配置
+      </button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+const _INITIAL_PROJECT_CONFIG = {{ project_config|tojson }};
+const _INITIAL_WORKFLOW_CONFIG = {{ workflow_config|tojson }};
+
+function configPage() {
+  return {
+    config: JSON.parse(JSON.stringify(_INITIAL_PROJECT_CONFIG)),
+    workflowTables: _INITIAL_WORKFLOW_CONFIG.relation_tables || {},
+    allModels: {},  // {asset_type: [{model_name, platform, params_schema}]}
+
+    async init() {
+      const manifests = await API.get('/api/ai_modules').catch(()=>[]);
+      this.allModels = {};
+      for (const m of (manifests || [])) {
+        for (const model of (m.models || [])) {
+          const t = model.asset_type;
+          if (!this.allModels[t]) this.allModels[t] = [];
+          this.allModels[t].push({
+            model_name: model.model_name,
+            platform: m.platform,
+            params_schema: model.params_schema || {},
+            description: model.description || '',
+          });
+        }
+      }
+      if (!this.config.defaults) this.config.defaults = {};
+      if (!this.config.global_thread_limit) this.config.global_thread_limit = 3;
+    },
+
+    getModelsForType(assetType) {
+      return this.allModels[assetType] || [];
+    },
+
+    getDefault(tableName, slotName, field) {
+      return this.config.defaults?.[tableName]?.[slotName]?.[field] || '';
+    },
+
+    setDefault(tableName, slotName, field, value) {
+      if (!this.config.defaults) this.config.defaults = {};
+      if (!this.config.defaults[tableName]) this.config.defaults[tableName] = {};
+      if (!this.config.defaults[tableName][slotName]) this.config.defaults[tableName][slotName] = {};
+      this.config.defaults[tableName][slotName][field] = value;
+    },
+
+    getPromptDefault(tableName, slotName, segName) {
+      return this.config.defaults?.[tableName]?.[slotName]?.prompt_defaults?.[segName] || '';
+    },
+
+    setPromptDefault(tableName, slotName, segName, value) {
+      if (!this.config.defaults) this.config.defaults = {};
+      if (!this.config.defaults[tableName]) this.config.defaults[tableName] = {};
+      if (!this.config.defaults[tableName][slotName]) this.config.defaults[tableName][slotName] = {};
+      if (!this.config.defaults[tableName][slotName].prompt_defaults)
+        this.config.defaults[tableName][slotName].prompt_defaults = {};
+      this.config.defaults[tableName][slotName].prompt_defaults[segName] = value;
+    },
+
+    getParamsSchema(tableName, slotName) {
+      const modelName = this.getDefault(tableName, slotName, 'model_name');
+      if (!modelName) return {};
+      for (const models of Object.values(this.allModels)) {
+        for (const m of models) {
+          if (m.model_name === modelName) return m.params_schema || {};
+        }
+      }
+      return {};
+    },
+
+    getGenConfig(tableName, slotName, param, defaultVal) {
+      return this.config.defaults?.[tableName]?.[slotName]?.gen_config?.[param] ?? defaultVal;
+    },
+
+    setGenConfig(tableName, slotName, param, value) {
+      if (!this.config.defaults) this.config.defaults = {};
+      if (!this.config.defaults[tableName]) this.config.defaults[tableName] = {};
+      if (!this.config.defaults[tableName][slotName]) this.config.defaults[tableName][slotName] = {};
+      if (!this.config.defaults[tableName][slotName].gen_config)
+        this.config.defaults[tableName][slotName].gen_config = {};
+      this.config.defaults[tableName][slotName].gen_config[param] = value;
+    },
+
+    async onWorkflowChange() {
+      // 重新加载工作流配置（简单刷新页面）
+      window.location.reload();
+    },
+
+    async saveConfig() {
+      const res = await API.post('/config/save', this.config).catch(e=>({error:e.message}));
+      if (res && res.ok) {
+        // 显示成功提示并跳转到仪表盘
+        window.location = '/dashboard';
+      } else {
+        alert((res && res.error) || '保存失败');
+      }
+    },
+  };
+}
+</script>
+{% endblock %}

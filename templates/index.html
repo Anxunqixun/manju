@@ -1,0 +1,210 @@
+{% extends "base.html" %}
+{% block title %}项目管理 — AI生成工作流{% endblock %}
+
+{% block content %}
+<div x-data="projectsPage()" x-init="init()">
+  <div class="max-w-4xl mx-auto">
+    <div class="flex items-center justify-between mb-6">
+      <h1 class="text-2xl font-bold text-gray-900">项目管理</h1>
+      <div class="flex gap-2">
+        <button @click="showImport=true"
+                class="px-4 py-2 rounded-lg border border-gray-300 text-sm text-gray-600 hover:border-indigo-400 transition-colors">
+          导入项目
+        </button>
+        <button @click="showCreate=true"
+                class="px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 transition-colors">
+          + 新建项目
+        </button>
+      </div>
+    </div>
+
+    <!-- 项目列表 -->
+    <div class="grid gap-4">
+      {% for project in projects %}
+      <div class="bg-white rounded-xl border border-gray-200 p-5 flex items-center gap-4 hover:border-indigo-300 transition-colors shadow-sm"
+           :class="{'border-indigo-400 ring-2 ring-indigo-100': '{{ project.name }}' === currentProject}">
+        <div class="w-10 h-10 rounded-lg bg-indigo-100 flex items-center justify-center text-indigo-600 font-bold text-lg shrink-0">
+          {{ project.name[0] }}
+        </div>
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center gap-2">
+            <h3 class="font-semibold text-gray-900 truncate">{{ project.name }}</h3>
+            {% if project.name == current_project %}
+            <span class="px-2 py-0.5 text-xs bg-indigo-100 text-indigo-700 rounded-full">当前</span>
+            {% endif %}
+          </div>
+          <p class="text-sm text-gray-500 mt-0.5">工作流：{{ project.workflow or '未配置' }}</p>
+        </div>
+        <div class="flex items-center gap-2 shrink-0">
+          <a href="/switch/{{ project.name }}"
+             class="px-3 py-1.5 text-sm rounded-lg border border-gray-300 text-gray-600 hover:border-indigo-400 hover:text-indigo-600 transition-colors">
+            切换
+          </a>
+          <a href="/switch/{{ project.name }}" onclick="window.location='/dashboard'"
+             @click.prevent="switchAndGo('{{ project.name }}')"
+             class="px-3 py-1.5 text-sm rounded-lg bg-indigo-50 text-indigo-700 hover:bg-indigo-100 transition-colors">
+            打开
+          </a>
+          <a href="/projects/export/{{ project.name }}"
+             class="px-3 py-1.5 text-sm rounded-lg border border-gray-300 text-gray-500 hover:border-gray-400 transition-colors">
+            导出
+          </a>
+          <button @click="confirmDelete('{{ project.name }}')"
+                  class="px-3 py-1.5 text-sm rounded-lg border border-red-200 text-red-500 hover:bg-red-50 transition-colors">
+            删除
+          </button>
+        </div>
+      </div>
+      {% else %}
+      <div class="text-center py-16 text-gray-400">
+        <div class="text-5xl mb-4">🎬</div>
+        <p class="text-lg">还没有项目</p>
+        <p class="text-sm mt-1">点击右上角「新建项目」开始</p>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <!-- 新建项目弹窗 -->
+  <div x-show="showCreate" x-cloak
+       class="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
+       @click.self="showCreate=false">
+    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+      <h2 class="text-lg font-semibold mb-4">新建项目</h2>
+      <div class="space-y-4">
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">项目名称</label>
+          <input x-model="createForm.name" type="text" placeholder="如：XX漫剧第一集"
+                 class="w-full px-3 py-2 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-indigo-300 text-sm">
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">工作流</label>
+          <select x-model="createForm.workflow"
+                  class="w-full px-3 py-2 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-indigo-300 text-sm">
+            <option value="">请选择工作流</option>
+            <template x-for="wf in workflows" :key="wf">
+              <option :value="wf" x-text="wf"></option>
+            </template>
+          </select>
+          <p class="text-xs text-gray-400 mt-1" x-show="workflows.length===0">正在加载工作流列表...</p>
+        </div>
+      </div>
+      <div class="flex gap-3 mt-6">
+        <button @click="showCreate=false"
+                class="flex-1 px-4 py-2 rounded-lg border border-gray-300 text-gray-600 text-sm hover:bg-gray-50 transition-colors">
+          取消
+        </button>
+        <button @click="createProject()"
+                :disabled="!createForm.name || !createForm.workflow"
+                class="flex-1 px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
+          创建
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 导入项目弹窗 -->
+  <div x-show="showImport" x-cloak
+       class="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
+       @click.self="showImport=false">
+    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+      <h2 class="text-lg font-semibold mb-4">导入项目</h2>
+      <div class="border-2 border-dashed border-gray-300 rounded-xl p-8 text-center">
+        <input type="file" accept=".zip" x-ref="importFile" @change="importProject()" class="hidden">
+        <button @click="$refs.importFile.click()"
+                class="text-indigo-600 hover:underline text-sm">
+          点击选择 .zip 文件
+        </button>
+        <p class="text-xs text-gray-400 mt-2">仅支持由本系统导出的项目 zip</p>
+      </div>
+      <div class="flex justify-end mt-4">
+        <button @click="showImport=false"
+                class="px-4 py-2 text-sm text-gray-500 hover:text-gray-700">取消</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 删除确认弹窗 -->
+  <div x-show="deleteTarget" x-cloak
+       class="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6">
+      <h2 class="text-lg font-semibold text-red-600 mb-2">删除项目</h2>
+      <p class="text-sm text-gray-600 mb-4">
+        确认删除项目 <strong x-text="deleteTarget"></strong>？<br>
+        此操作将删除该项目的所有数据和文件，不可撤销。
+      </p>
+      <div class="flex gap-3">
+        <button @click="deleteTarget=''"
+                class="flex-1 px-4 py-2 rounded-lg border border-gray-300 text-gray-600 text-sm">取消</button>
+        <button @click="doDelete()"
+                class="flex-1 px-4 py-2 rounded-lg bg-red-600 text-white text-sm font-medium hover:bg-red-700">
+          确认删除
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+function projectsPage() {
+  return {
+    showCreate: false,
+    showImport: false,
+    deleteTarget: '',
+    workflows: [],
+    createForm: { name: '', workflow: '' },
+
+    async init() {
+      const wfs = await API.get('/api/workflows').catch(()=>[]);
+      this.workflows = Array.isArray(wfs) ? wfs : [];
+      if (this.workflows.length > 0 && !this.createForm.workflow) {
+        this.createForm.workflow = this.workflows[0];
+      }
+    },
+
+    async switchAndGo(name) {
+      await fetch('/switch/' + encodeURIComponent(name));
+      window.location = '/dashboard';
+    },
+
+    async createProject() {
+      if (!this.createForm.name || !this.createForm.workflow) return;
+      const res = await API.post('/projects/create', this.createForm).catch(e=>({error:e.message}));
+      if (res.error) {
+        this.$dispatch('show-toast', {message: res.error, type: 'error'});
+        return;
+      }
+      window.location = '/config';
+    },
+
+    async importProject() {
+      const file = this.$refs.importFile.files[0];
+      if (!file) return;
+      const fd = new FormData();
+      fd.append('file', file);
+      const res = await fetch('/projects/import', {method:'POST', body:fd}).then(r=>r.json());
+      if (res.error) {
+        alert(res.error);
+      } else {
+        window.location.reload();
+      }
+    },
+
+    confirmDelete(name) {
+      this.deleteTarget = name;
+    },
+
+    async doDelete() {
+      const name = this.deleteTarget;
+      this.deleteTarget = '';
+      const res = await API.delete(`/projects/delete/${encodeURIComponent(name)}`).catch(e=>({error:e.message}));
+      if (res && res.ok) {
+        window.location.reload();
+      }
+    },
+  };
+}
+</script>
+{% endblock %}

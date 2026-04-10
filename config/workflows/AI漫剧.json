@@ -1,0 +1,92 @@
+{
+  "workflow_name": "AI漫剧",
+  "description": "AI漫剧生成工作流，包含角色、场景、道具、分镜四大关系表",
+
+  "relation_tables": {
+    "角色": {
+      "chain_mode": "strict",
+      "node_name_pattern": "{name}_角色节点{index}",
+      "slots": {
+        "角色主视图": {
+          "asset_type": "图片",
+          "prompt_template": [
+            {"角色描述": ""},
+            {"风格": ""}
+          ],
+          "inner_dep": null
+        },
+        "角色四视图": {
+          "asset_type": "图片",
+          "prompt_template": [
+            {"角色描述": ""},
+            {"视角": "四方向视图，正面、侧面、背面、斜45度"}
+          ],
+          "inner_dep": "角色主视图"
+        },
+        "角色音色卡": {
+          "asset_type": "音色卡",
+          "prompt_template": [],
+          "inner_dep": null
+        }
+      }
+    },
+    "场景": {
+      "chain_mode": "parallel",
+      "node_name_pattern": "{name}_场景{index}",
+      "slots": {
+        "场景全景图": {
+          "asset_type": "图片",
+          "prompt_template": [
+            {"场景描述": ""},
+            {"风格": ""},
+            {"光线与氛围": ""}
+          ],
+          "inner_dep": null
+        }
+      }
+    },
+    "道具": {
+      "chain_mode": "parallel",
+      "node_name_pattern": "{name}_道具{index}",
+      "slots": {
+        "道具图": {
+          "asset_type": "图片",
+          "prompt_template": [
+            {"道具描述": ""},
+            {"风格": ""}
+          ],
+          "inner_dep": null
+        }
+      }
+    },
+    "分镜": {
+      "chain_mode": "strict",
+      "node_name_pattern": "第{index}镜",
+      "slots": {
+        "分镜视频": {
+          "asset_type": "视频",
+          "prompt_template": [
+            {"分镜描述": ""},
+            {"镜头运动": ""},
+            {"角色动作": ""}
+          ],
+          "inner_dep": null
+        },
+        "分镜音频": {
+          "asset_type": "音频",
+          "prompt_template": [
+            {"台词": ""},
+            {"情感": ""},
+            {"语速": "正常"}
+          ],
+          "inner_dep": null
+        }
+      }
+    }
+  },
+
+  "assembly_rules": {
+    "prompt_join_separator": "\n",
+    "说明": "组装层将prompt各分段按顺序以separator拼接，连同dependencies中各依赖资产的asset_paths和extra_data一起打包为统一结构传给网关层，不做任何变量替换，AI模块内部自行解析ref引用"
+  }
+}

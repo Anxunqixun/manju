@@ -1,0 +1,61 @@
+{
+  "platform": "Runway",
+  "models": [
+    {
+      "model_name": "runway_gen3",
+      "asset_type": "视频",
+      "description": "Runway Gen-3 视频生成",
+      "params_schema": {
+        "ratio": {
+          "type": "select",
+          "options": ["16:9", "9:16", "1:1"],
+          "default": "16:9"
+        },
+        "duration": {
+          "type": "select",
+          "options": ["4s", "8s", "16s"],
+          "default": "4s"
+        },
+        "resolution": {
+          "type": "select",
+          "options": ["720p", "1080p"],
+          "default": "1080p"
+        },
+        "batch_size": {
+          "type": "number",
+          "min": 1,
+          "max": 4,
+          "default": 1
+        }
+      }
+    },
+    {
+      "model_name": "runway_gen4",
+      "asset_type": "视频",
+      "description": "Runway Gen-4 视频生成（最新）",
+      "params_schema": {
+        "ratio": {
+          "type": "select",
+          "options": ["16:9", "9:16", "1:1", "4:3"],
+          "default": "16:9"
+        },
+        "duration": {
+          "type": "select",
+          "options": ["4s", "8s", "16s", "30s"],
+          "default": "8s"
+        },
+        "resolution": {
+          "type": "select",
+          "options": ["720p", "1080p", "4K"],
+          "default": "1080p"
+        },
+        "batch_size": {
+          "type": "number",
+          "min": 1,
+          "max": 2,
+          "default": 1
+        }
+      }
+    }
+  ]
+}

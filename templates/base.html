@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="zh-CN" x-data="appStore()" x-init="init()">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}AI生成工作流{% endblock %}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <script src="/static/js/api.js"></script>
+  <script src="/static/js/sse.js"></script>
+  <style>
+    [x-cloak] { display: none !important; }
+    .status-waiting    { @apply bg-gray-400; }
+    .status-queuing    { @apply bg-yellow-400; }
+    .status-processing { @apply bg-blue-500 animate-pulse; }
+    .status-success    { @apply bg-green-500; }
+    .status-failed     { @apply bg-red-500; }
+    .status-cancelled  { @apply bg-orange-400; }
+    .drawer-overlay { transition: opacity 0.2s ease; }
+    .drawer-panel   { transition: transform 0.25s ease; }
+  </style>
+</head>
+<body class="bg-gray-50 text-gray-800 min-h-screen flex flex-col">
+
+  <!-- 导航栏 -->
+  <nav class="bg-white border-b border-gray-200 px-4 py-3 flex items-center gap-4 shadow-sm">
+    <a href="/" class="text-xl font-bold text-indigo-600 shrink-0">AI工作流</a>
+
+    <!-- 项目选择器 -->
+    <div class="relative" x-data="{open:false}">
+      <button @click="open=!open"
+              class="flex items-center gap-1 px-3 py-1.5 rounded-lg border border-gray-300 text-sm hover:border-indigo-400 transition-colors">
+        <span class="text-gray-500 text-xs">项目：</span>
+        <span class="font-medium" x-text="currentProject || '未选择'"></span>
+        <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+        </svg>
+      </button>
+      <div x-show="open" x-cloak @click.outside="open=false"
+           class="absolute top-full left-0 mt-1 w-56 bg-white border border-gray-200 rounded-lg shadow-lg z-50 py-1">
+        <template x-for="p in projects" :key="p.name">
+          <a :href="'/switch/'+p.name"
+             class="block px-4 py-2 text-sm hover:bg-indigo-50 transition-colors"
+             :class="p.name===currentProject?'text-indigo-600 font-medium':'text-gray-700'"
+             x-text="p.name"></a>
+        </template>
+        <div class="border-t border-gray-100 my-1"></div>
+        <a href="/" class="block px-4 py-2 text-sm text-gray-500 hover:bg-gray-50">管理项目...</a>
+      </div>
+    </div>
+
+    <!-- 页面导航 -->
+    <div class="flex items-center gap-1 ml-2">
+      <a href="/dashboard"
+         class="px-3 py-1.5 rounded-lg text-sm transition-colors {% if request.path == '/dashboard' %}bg-indigo-100 text-indigo-700 font-medium{% else %}text-gray-600 hover:bg-gray-100{% endif %}">
+        仪表盘
+      </a>
+      {% if workflow_config is defined and workflow_config and workflow_config.get('relation_tables') %}
+        {% for table_name in workflow_config['relation_tables'].keys() %}
+        <a href="/table/{{ table_name }}"
+           class="px-3 py-1.5 rounded-lg text-sm transition-colors {% if request.path == '/table/' + table_name %}bg-indigo-100 text-indigo-700 font-medium{% else %}text-gray-600 hover:bg-gray-100{% endif %}">
+          {{ table_name }}
+        </a>
+        {% endfor %}
+      {% endif %}
+    </div>
+
+    <div class="ml-auto flex items-center gap-2">
+      <a href="/export"
+         class="px-3 py-1.5 rounded-lg text-sm border border-gray-300 text-gray-600 hover:border-indigo-400 hover:text-indigo-600 transition-colors">
+        导出
+      </a>
+      <a href="/config"
+         class="px-3 py-1.5 rounded-lg text-sm border border-gray-300 text-gray-600 hover:border-indigo-400 hover:text-indigo-600 transition-colors">
+        配置
+      </a>
+
+      <!-- SSE 连接状态 -->
+      <div class="flex items-center gap-1 text-xs text-gray-400">
+        <span class="w-2 h-2 rounded-full"
+              :class="sseConnected ? 'bg-green-400' : 'bg-gray-300'"></span>
+        <span x-text="sseConnected ? '实时' : '离线'"></span>
+      </div>
+    </div>
+  </nav>
+
+  <!-- 主内容 -->
+  <main class="flex-1 p-6">
+    {% block content %}{% endblock %}
+  </main>
+
+  <!-- 全局通知 Toast -->
+  <div class="fixed bottom-4 right-4 flex flex-col gap-2 z-[100]" x-cloak>
+    <template x-for="(toast, i) in toasts" :key="i">
+      <div x-show="toast.visible"
+           x-transition:enter="transition ease-out duration-200"
+           x-transition:enter-start="opacity-0 translate-y-2"
+           x-transition:enter-end="opacity-100 translate-y-0"
+           x-transition:leave="transition ease-in duration-150"
+           x-transition:leave-start="opacity-100"
+           x-transition:leave-end="opacity-0"
+           class="flex items-center gap-3 px-4 py-3 rounded-lg shadow-lg text-white text-sm max-w-sm"
+           :class="{
+             'bg-green-600': toast.type==='success',
+             'bg-red-600': toast.type==='error',
+             'bg-blue-600': toast.type==='info',
+             'bg-yellow-500': toast.type==='warning'
+           }">
+        <span x-text="toast.message"></span>
+        <button @click="toast.visible=false" class="ml-auto opacity-70 hover:opacity-100">✕</button>
+      </div>
+    </template>
+  </div>
+
+  <script>
+  function appStore() {
+    return {
+      currentProject: {{ (current_project if current_project is defined else '')|tojson }},
+      projects: [],
+      sseConnected: false,
+      toasts: [],
+      sseClient: null,
+
+      async init() {
+        // 加载项目列表
+        const data = await API.get('/api/projects').catch(()=>[]);
+        this.projects = Array.isArray(data) ? data : [];
+
+        // 连接 SSE
+        if (this.currentProject) {
+          this.connectSSE();
+        }
+      },
+
+      connectSSE() {
+        if (this.sseClient) this.sseClient.disconnect();
+        this.sseClient = new SSEClient(this.currentProject, (evt) => {
+          this.handleSSEEvent(evt);
+        });
+        this.sseClient.onConnect = () => { this.sseConnected = true; };
+        this.sseClient.onDisconnect = () => { this.sseConnected = false; };
+        this.sseClient.connect();
+      },
+
+      handleSSEEvent(evt) {
+        // 派发到 document 让各页面组件监听
+        document.dispatchEvent(new CustomEvent('sse:event', { detail: evt }));
+
+        if (evt.event === 'task_complete') {
+          const msg = evt.success
+            ? `✓ 资产 ${evt.asset_id} 生成完成`
+            : `✗ 资产 ${evt.asset_id} 生成失败`;
+          this.showToast(msg, evt.success ? 'success' : 'error');
+        }
+      },
+
+      showToast(message, type='info', duration=4000) {
+        const toast = { message, type, visible: true };
+        this.toasts.push(toast);
+        setTimeout(() => { toast.visible = false; }, duration);
+        setTimeout(() => {
+          this.toasts = this.toasts.filter(t => t !== toast);
+        }, duration + 300);
+      },
+    };
+  }
+  </script>
+
+  {% block extra_scripts %}{% endblock %}
+</body>
+</html>

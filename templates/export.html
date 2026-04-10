@@ -1,0 +1,218 @@
+{% extends "base.html" %}
+{% block title %}导出结果 — {{ current_project }}{% endblock %}
+
+{% block content %}
+<div x-data="exportPage()" x-init="init()">
+  <div class="max-w-4xl mx-auto">
+    <div class="flex items-center justify-between mb-6">
+      <div>
+        <h1 class="text-2xl font-bold text-gray-900">导出结果</h1>
+        <p class="text-sm text-gray-500 mt-0.5">项目：{{ current_project }}</p>
+      </div>
+    </div>
+
+    <!-- 步骤1：选择关系表 -->
+    <div class="bg-white rounded-xl border border-gray-200 p-5 mb-4 shadow-sm">
+      <h2 class="font-semibold text-gray-800 mb-4 flex items-center gap-2">
+        <span class="w-6 h-6 rounded-full bg-indigo-100 text-indigo-700 text-xs flex items-center justify-center font-bold">1</span>
+        选择关系表
+      </h2>
+      <div class="flex flex-wrap gap-2">
+        {% for table_display_name in workflow_config.get('relation_tables', {}).keys() %}
+        <label class="flex items-center gap-2 px-4 py-2 rounded-lg border cursor-pointer transition-colors"
+               :class="selectedTables.includes('{{ table_display_name }}') ? 'border-indigo-400 bg-indigo-50 text-indigo-700' : 'border-gray-300 text-gray-600 hover:border-gray-400'">
+          <input type="checkbox" value="{{ table_display_name }}"
+                 x-model="selectedTables" class="hidden">
+          {{ table_display_name }}
+        </label>
+        {% endfor %}
+      </div>
+    </div>
+
+    <!-- 步骤2：选择槽位 -->
+    <div class="bg-white rounded-xl border border-gray-200 p-5 mb-4 shadow-sm"
+         x-show="selectedTables.length > 0">
+      <h2 class="font-semibold text-gray-800 mb-4 flex items-center gap-2">
+        <span class="w-6 h-6 rounded-full bg-indigo-100 text-indigo-700 text-xs flex items-center justify-center font-bold">2</span>
+        选择槽位
+      </h2>
+      {% for table_display_name, table_def in workflow_config.get('relation_tables', {}).items() %}
+      <div x-show="selectedTables.includes('{{ table_display_name }}')" class="mb-4 last:mb-0">
+        <div class="text-sm font-medium text-gray-700 mb-2">{{ table_display_name }}</div>
+        <div class="flex flex-wrap gap-2">
+          {% for slot_name in table_def.get('slots', {}).keys() %}
+          <label class="flex items-center gap-2 px-3 py-1.5 rounded-lg border cursor-pointer transition-colors text-sm"
+                 :class="isSlotSelected('{{ table_display_name }}', '{{ slot_name }}') ? 'border-indigo-400 bg-indigo-50 text-indigo-700' : 'border-gray-300 text-gray-600 hover:border-gray-400'">
+            <input type="checkbox"
+                   @change="toggleSlot('{{ table_display_name }}', '{{ slot_name }}', $event.target.checked)"
+                   :checked="isSlotSelected('{{ table_display_name }}', '{{ slot_name }}')"
+                   class="hidden">
+            {{ slot_name }}
+          </label>
+          {% endfor %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+
+    <!-- 步骤3：选择记录 -->
+    <div class="bg-white rounded-xl border border-gray-200 p-5 mb-4 shadow-sm"
+         x-show="selectedTables.length > 0">
+      <h2 class="font-semibold text-gray-800 mb-4 flex items-center gap-2">
+        <span class="w-6 h-6 rounded-full bg-indigo-100 text-indigo-700 text-xs flex items-center justify-center font-bold">3</span>
+        选择记录
+        <span class="ml-auto text-xs text-gray-400 font-normal">
+          <button @click="selectAllRecords()" class="hover:text-indigo-600 mr-2">全选</button>
+          <button @click="clearRecords()" class="hover:text-gray-600">清空</button>
+        </span>
+      </h2>
+      <template x-for="tableName in selectedTables" :key="tableName">
+        <div class="mb-4 last:mb-0">
+          <div class="text-sm font-medium text-gray-700 mb-2" x-text="tableName"></div>
+          <div class="flex flex-wrap gap-2">
+            <template x-for="rec in (tableRecords[tableName] || [])" :key="rec.id">
+              <label class="flex items-center gap-2 px-3 py-1.5 rounded-lg border cursor-pointer transition-colors text-sm"
+                     :class="isRecordSelected(tableName, rec.id) ? 'border-indigo-400 bg-indigo-50 text-indigo-700' : 'border-gray-300 text-gray-600 hover:border-gray-400'">
+                <input type="checkbox"
+                       @change="toggleRecord(tableName, rec.id, $event.target.checked)"
+                       :checked="isRecordSelected(tableName, rec.id)"
+                       class="hidden">
+                <span x-text="rec.name || `记录 ${rec.id}`"></span>
+              </label>
+            </template>
+            <div x-show="!(tableRecords[tableName] || []).length" class="text-xs text-gray-400">暂无记录</div>
+          </div>
+        </div>
+      </template>
+    </div>
+
+    <!-- 导出按钮 -->
+    <div class="flex justify-end gap-3">
+      <a href="/dashboard" class="px-5 py-2.5 rounded-xl border border-gray-300 text-gray-600 text-sm hover:bg-gray-50 transition-colors">
+        取消
+      </a>
+      <button @click="doExport()"
+              :disabled="selectedTables.length===0 || exporting"
+              class="px-6 py-2.5 rounded-xl bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 disabled:opacity-50 transition-colors">
+        <span x-text="exporting ? '打包中...' : '导出 ZIP'"></span>
+      </button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+const _EXPORT_PROJECT = {{ current_project|tojson }};
+
+function exportPage() {
+  return {
+    selectedTables: [],
+    selectedSlots: {},    // {tableName: [slotNames]}
+    selectedRecordIds: {}, // {tableName: [ids]}
+    tableRecords: {},
+    exporting: false,
+
+    async init() {
+      // 监听 selectedTables 变化，自动加载该表的记录
+      this.$watch('selectedTables', async (tables) => {
+        for (const t of tables) {
+          await this.loadRecords(t);
+        }
+      });
+    },
+
+    isSlotSelected(tableName, slotName) {
+      return (this.selectedSlots[tableName] || []).includes(slotName);
+    },
+
+    toggleSlot(tableName, slotName, checked) {
+      if (!this.selectedSlots[tableName]) this.selectedSlots[tableName] = [];
+      if (checked) {
+        if (!this.selectedSlots[tableName].includes(slotName))
+          this.selectedSlots[tableName].push(slotName);
+      } else {
+        this.selectedSlots[tableName] = this.selectedSlots[tableName].filter(s => s !== slotName);
+      }
+    },
+
+    isRecordSelected(tableName, id) {
+      return (this.selectedRecordIds[tableName] || []).includes(id);
+    },
+
+    toggleRecord(tableName, id, checked) {
+      if (!this.selectedRecordIds[tableName]) this.selectedRecordIds[tableName] = [];
+      if (checked) {
+        if (!this.selectedRecordIds[tableName].includes(id))
+          this.selectedRecordIds[tableName].push(id);
+      } else {
+        this.selectedRecordIds[tableName] = this.selectedRecordIds[tableName].filter(i => i !== id);
+      }
+    },
+
+    async loadRecords(tableName) {
+      if (this.tableRecords[tableName]) return;
+      const tbl = `rel_${tableName}`;
+      const data = await API.get(`/api/${_EXPORT_PROJECT}/tables/${tbl}`).catch(()=>[]);
+      this.tableRecords[tableName] = Array.isArray(data) ? data : [];
+      // 默认全选
+      this.selectedRecordIds[tableName] = this.tableRecords[tableName].map(r => r.id);
+    },
+
+    selectAllRecords() {
+      for (const t of this.selectedTables) {
+        const records = this.tableRecords[t] || [];
+        this.selectedRecordIds[t] = records.map(r => r.id);
+      }
+    },
+
+    clearRecords() {
+      this.selectedRecordIds = {};
+    },
+
+    async doExport() {
+      this.exporting = true;
+      try {
+        const body = {
+          tables: this.selectedTables,
+          slots: this.selectedSlots,
+          record_ids: this.selectedRecordIds,
+        };
+        const res = await fetch('/export/download', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify(body),
+        });
+        if (!res.ok) {
+          const err = await res.json();
+          alert(err.error || '导出失败');
+          return;
+        }
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${_EXPORT_PROJECT}_export.zip`;
+        a.click();
+        URL.revokeObjectURL(url);
+      } finally {
+        this.exporting = false;
+      }
+    },
+
+    // 监听 selectedTables 变化，加载记录
+    async watchTables(tables) {
+      for (const t of tables) {
+        await this.loadRecords(t);
+      }
+    },
+  };
+}
+</script>
+<script>
+// Alpine watch 需要在 x-init 后用 $watch
+document.addEventListener('alpine:init', () => {
+  // 不需要手动绑定，watchTables 在模板中通过 x-effect 调用
+});
+</script>
+{% endblock %}
