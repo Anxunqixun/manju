@@ -57,6 +57,11 @@ def table_page(table_display_name: str):
     # 构建树结构：根节点 + 子节点链
     chains = _build_chains(enriched_records, table_config)
 
+    # 为每个槽位预计算默认值，供前端新建弹窗预填
+    slot_defaults = {}
+    for slot_name in table_config.get("slots", {}).keys():
+        slot_defaults[slot_name] = get_slot_default(project_config, table_display_name, slot_name)
+
     return render_template("relation_table.html",
                            current_project=current,
                            table_display_name=table_display_name,
@@ -65,7 +70,8 @@ def table_page(table_display_name: str):
                            chains=chains,
                            all_records=enriched_records,
                            project_config=project_config,
-                           workflow_config=workflow_config)
+                           workflow_config=workflow_config,
+                           slot_defaults=slot_defaults)
 
 
 def _build_chains(records: list[dict], table_config: dict) -> list[list[dict]]:

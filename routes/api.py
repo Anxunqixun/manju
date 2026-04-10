@@ -124,6 +124,47 @@ def serve_asset_file(project_name: str, rel_path_suffix: str):
 
 # ─── 关系表 ──────────────────────────────────────────────────────────────────
 
+@bp.route("/<project_name>/assets_for_deps")
+def get_assets_for_deps(project_name: str):
+    """
+    返回除 exclude 表之外所有关系表的记录和槽位资产，供新建弹窗选择外部依赖。
+    返回格式: [{display_name, records: [{id, name, node_name, slots: [{slot_name, asset_id, asset_type, status}]}]}]
+    """
+    exclude = request.args.get("exclude", "")
+    project_config = load_project_config(project_name)
+    workflow_name = project_config.get("workflow", "")
+    workflow_config = load_workflow_config(workflow_name) if workflow_name else {}
+
+    result = []
+    for tdn, _tc in workflow_config.get("relation_tables", {}).items():
+        if tdn == exclude:
+            continue
+        table_name = f"rel_{tdn}"
+        records = list_relation_records(project_name, table_name)
+        table_records = []
+        for rec in records:
+            slots_list = []
+            for slot_entry in (rec.get("ref_ids") or []):
+                for slot_name, ids in slot_entry.items():
+                    for aid in ids:
+                        asset = get_asset(project_name, aid)
+                        if asset:
+                            slots_list.append({
+                                "slot_name": slot_name,
+                                "asset_id": aid,
+                                "asset_type": asset["asset_type"],
+                                "status": asset["status"],
+                            })
+            table_records.append({
+                "id": rec["id"],
+                "name": rec.get("name", ""),
+                "node_name": rec.get("node_name", ""),
+                "slots": slots_list,
+            })
+        result.append({"display_name": tdn, "records": table_records})
+    return jsonify(result)
+
+
 @bp.route("/<project_name>/tables/<table_name>")
 def get_table_records(project_name: str, table_name: str):
     records = list_relation_records(project_name, table_name)
@@ -170,6 +211,7 @@ def create_table_record(project_name: str, table_name: str):
     # 批量创建资产，构建 ref_ids
     ref_ids = []
     inner_deps: dict[str, int] = {}  # slot_name -> asset_id
+    slots_override_map = data.get("slots") or {}
 
     for slot_name, slot_def in slots.items():
         asset_type = slot_def.get("asset_type", "图片")
@@ -188,10 +230,22 @@ def create_table_record(project_name: str, table_name: str):
             filled = {k: prompt_defaults.get(k, v) for k, v in seg.items()}
             prompt.append(filled)
 
+        # 应用前端传入的 per-slot 覆盖值
+        slot_override = slots_override_map.get(slot_name, {})
+        if slot_override.get("model_name") is not None:
+            model_name = slot_override["model_name"]
+        if slot_override.get("prompt") is not None:
+            prompt = slot_override["prompt"]
+        if slot_override.get("gen_config") is not None:
+            gen_config = {**gen_config, **slot_override["gen_config"]}
+
         # 构建依赖
         dependencies = []
         if inner_dep_slot and inner_dep_slot in inner_deps:
             dependencies.append(inner_deps[inner_dep_slot])
+        for dep_id in (slot_override.get("extra_deps") or []):
+            if dep_id not in dependencies:
+                dependencies.append(dep_id)
 
         asset_id = create_asset(
             project_name,
