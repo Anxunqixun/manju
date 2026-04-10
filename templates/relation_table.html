@@ -4,8 +4,12 @@
 {% block content %}
 <div x-data="tablePage()" x-init="init()">
 
+{# 计算最长链条长度，用于表格列数 #}
+{% set ns = namespace(max_len=1) %}
+{% for chain in chains %}{% if chain|length > ns.max_len %}{% set ns.max_len = chain|length %}{% endif %}{% endfor %}
+
   <!-- 顶部工具栏 -->
-  <div class="flex items-center justify-between mb-4">
+  <div class="flex items-center justify-between mb-3">
     <div>
       <h1 class="text-xl font-bold text-gray-900">{{ table_display_name }}</h1>
       <p class="text-sm text-gray-500">{{ current_project }} · {{ chains|length }} 条记录</p>
@@ -31,95 +35,116 @@
     </div>
   </div>
 
+  <!-- 状态图例 + 紧凑模式切换 -->
+  <div class="flex items-center justify-between mb-4">
+    <div class="flex items-center gap-5 text-xs text-gray-500">
+      <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-gray-400 shrink-0 inline-block"></span>未开始</span>
+      <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-purple-400 shrink-0 inline-block"></span>预处理中</span>
+      <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-yellow-400 shrink-0 inline-block"></span>排队中</span>
+      <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-blue-500 shrink-0 inline-block"></span>生成中</span>
+      <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-green-500 shrink-0 inline-block"></span>已生成</span>
+      <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-full bg-red-500 shrink-0 inline-block"></span>生成失败</span>
+    </div>
+    <div class="flex items-center gap-2">
+      <span class="text-sm text-gray-600">紧凑概览模式</span>
+      <button @click="compactMode=!compactMode"
+              class="relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none"
+              :class="compactMode ? 'bg-indigo-600' : 'bg-gray-300'">
+        <span class="inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform"
+              :class="compactMode ? 'translate-x-4' : 'translate-x-0.5'"></span>
+      </button>
+    </div>
+  </div>
+
   <!-- 主表格 -->
   <div class="bg-white rounded-xl border border-gray-200 shadow-sm overflow-x-auto">
-    <table class="w-full border-collapse text-sm">
+    <table class="border-collapse text-sm" style="min-width:100%">
       <thead>
         <tr class="bg-gray-50 border-b border-gray-200">
-          <th class="w-8 px-3 py-2.5 text-left">
+          <th class="w-8 px-3 py-3 text-left">
             <input type="checkbox" @change="toggleSelectAll($event)"
                    class="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500">
           </th>
-          <th class="w-36 px-3 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">名称</th>
-          <th class="px-3 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">节点 / 槽位状态</th>
-          <th class="w-28 px-3 py-2.5 text-right text-xs font-semibold text-gray-500 uppercase tracking-wide">操作</th>
+          <th class="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide border-r border-gray-100"
+              style="min-width:100px">
+            {{ table_display_name }}
+          </th>
+          {% for i in range(ns.max_len) %}
+          <th class="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wide border-r border-gray-100"
+              style="min-width:160px">
+            {% if i == 0 %}主要节点{% else %}衍生节点 {{ i }}{% endif %}
+          </th>
+          {% endfor %}
+          <th class="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wide"
+              style="min-width:110px">扩展操作</th>
         </tr>
       </thead>
       <tbody class="divide-y divide-gray-100">
         {% for chain in chains %}
         {% set root = chain[0] %}
-        <tr class="hover:bg-gray-50/60 transition-colors"
+        <tr class="hover:bg-gray-50/40 transition-colors"
             x-show="!statusFilter || chainMatchesFilter({{ chain|map(attribute='id')|list|tojson }})"
             x-cloak>
           <!-- 多选 -->
-          <td class="px-3 py-3 align-top">
+          <td class="px-3 py-4 align-middle">
             <input type="checkbox" :value="{{ root.id }}" x-model="selectedRoots"
                    class="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500">
           </td>
           <!-- 名称 -->
-          <td class="px-3 py-3 align-top">
-            <span class="font-medium text-gray-900">{{ root.name }}</span>
+          <td class="px-4 py-4 align-middle border-r border-gray-100">
+            <span class="font-medium text-gray-900 text-sm">{{ root.name }}</span>
           </td>
-          <!-- 节点链 -->
-          <td class="px-3 py-3 align-top">
-            <div class="flex items-start gap-2 flex-wrap">
-              {% for node in chain %}
-              <!-- 节点格子 -->
-              <div class="flex flex-col gap-1.5 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2
-                           cursor-pointer hover:border-indigo-400 hover:bg-indigo-50/50 transition-colors min-w-[80px]"
-                   @click="openDrawerById({{ node.id }})">
-                <div class="text-xs font-medium text-gray-700 leading-tight whitespace-nowrap">
-                  {{ node.node_name }}
+          <!-- 固定列数节点格子（= max_len 列） -->
+          {% for i in range(ns.max_len) %}
+          <td class="px-4 py-4 align-middle text-center border-r border-gray-100">
+            {% if i < chain|length %}
+            {% set node = chain[i] %}
+            <div class="inline-flex flex-col items-center gap-1.5 border border-gray-200 rounded-2xl
+                        cursor-pointer hover:border-indigo-400 hover:shadow-sm hover:bg-indigo-50/20 transition-all"
+                 :class="compactMode ? 'px-3 py-2 min-w-[80px]' : 'px-4 py-3 min-w-[110px]'"
+                 @click="openDrawerById({{ node.id }})">
+              <span class="text-xs font-medium text-gray-800 leading-tight text-center whitespace-nowrap">
+                {{ node.node_name }}
+              </span>
+              <div class="flex items-center gap-1">
+                {% for slot_name, slot_info in node.get('slots_status', {}).items() %}
+                <div class="rounded-full cursor-pointer hover:scale-125 transition-transform"
+                     :class="[getStatusClass(assetStatuses['{{ slot_info.asset_id }}'] || '{{ slot_info.status }}'),
+                              compactMode ? 'w-2 h-2' : 'w-2.5 h-2.5']"
+                     @click.stop="handleSlotDotClick({{ slot_info.asset_id }}, '{{ slot_name }}')"
+                     title="{{ slot_name }}">
                 </div>
-                <!-- 槽位状态点行 -->
-                <div class="flex items-center gap-1.5 flex-wrap">
-                  {% for slot_name, slot_info in node.get('slots_status', {}).items() %}
-                  <div class="relative group/dot">
-                    <div class="w-3 h-3 rounded-full cursor-pointer hover:scale-125 transition-transform"
-                         :class="getStatusClass(assetStatuses['{{ slot_info.asset_id }}'] || '{{ slot_info.status }}')"
-                         @click.stop="handleSlotDotClick({{ slot_info.asset_id }}, '{{ slot_name }}')">
-                    </div>
-                    <div class="absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 px-2 py-1
-                                bg-gray-900 text-white text-xs rounded whitespace-nowrap
-                                opacity-0 group-hover/dot:opacity-100 transition-opacity
-                                pointer-events-none z-20">
-                      {{ slot_name }}
-                    </div>
-                  </div>
-                  {% endfor %}
-                </div>
+                {% endfor %}
               </div>
-              <!-- 箭头（节点间） -->
-              {% if not loop.last %}
-              <div class="text-gray-300 text-base self-center">→</div>
-              {% endif %}
-              {% endfor %}
-              <!-- 添加子节点按钮 -->
-              <button @click.stop="openCreateChild({{ chain[0].id }}, {{ chain[-1].id }})"
-                      class="self-center text-xs text-gray-400 hover:text-indigo-600
-                             border border-dashed border-gray-300 hover:border-indigo-400
-                             rounded-lg px-2.5 py-1.5 transition-colors whitespace-nowrap">
-                + 添加节点
-              </button>
             </div>
+            {% endif %}
           </td>
-          <!-- 操作 -->
-          <td class="px-3 py-3 align-top text-right">
-            <div class="flex items-center justify-end gap-2">
-              <button @click="generateChainByIds({{ chain|map(attribute='id')|list|tojson }})"
-                      class="text-xs text-indigo-600 hover:text-indigo-800 font-medium transition-colors">
-                生成
+          {% endfor %}
+          <!-- 扩展操作列 -->
+          <td class="px-4 py-4 align-middle text-center">
+            <div class="flex flex-col items-center gap-1.5">
+              <button @click.stop="openCreateChild({{ chain[0].id }}, {{ chain[-1].id }})"
+                      class="text-xs text-gray-400 hover:text-indigo-600
+                             border border-dashed border-gray-300 hover:border-indigo-400
+                             rounded-xl px-3 py-1 transition-colors whitespace-nowrap">
+                + 加节点
               </button>
-              <button @click="deleteChain({{ root.id }})"
-                      class="text-xs text-red-400 hover:text-red-600 transition-colors">
-                删除
-              </button>
+              <div class="flex items-center gap-2">
+                <button @click="generateChainByIds({{ chain|map(attribute='id')|list|tojson }})"
+                        class="text-xs text-indigo-600 hover:text-indigo-800 font-medium transition-colors">
+                  生成
+                </button>
+                <button @click="deleteChain({{ root.id }})"
+                        class="text-xs text-red-400 hover:text-red-600 transition-colors">
+                  删除
+                </button>
+              </div>
             </div>
           </td>
         </tr>
         {% else %}
         <tr>
-          <td colspan="4" class="text-center py-14 text-gray-400">
+          <td colspan="{{ ns.max_len + 3 }}" class="text-center py-14 text-gray-400">
             <div class="text-4xl mb-3">📋</div>
             <p class="text-sm">还没有记录</p>
             <p class="text-xs mt-1">点击右上角「新建{{ table_display_name }}」开始添加</p>
@@ -231,6 +256,34 @@
                   </template>
                 </div>
               </template>
+
+              <!-- 依赖资产 -->
+              <div>
+                <div class="flex items-center justify-between mb-1">
+                  <label class="text-xs text-gray-500">依赖资产</label>
+                  <button @click="openDrawerDepPicker(slotInfo.asset_id, slotName)"
+                          class="text-xs text-indigo-600 hover:text-indigo-800
+                                 border border-indigo-300 hover:border-indigo-500
+                                 rounded px-2 py-0.5 transition-colors">
+                    + 添加依赖
+                  </button>
+                </div>
+                <div class="flex flex-wrap gap-1.5 min-h-[1.5rem]">
+                  <template x-if="(assetDetails[slotInfo.asset_id]?.dependencies || []).length === 0">
+                    <span class="text-xs text-gray-400">暂无依赖</span>
+                  </template>
+                  <template x-for="depId in (assetDetails[slotInfo.asset_id]?.dependencies || [])" :key="depId">
+                    <span class="inline-flex items-center gap-1 text-xs bg-gray-100 text-gray-700
+                                 border border-gray-200 rounded-full px-2 py-0.5">
+                      <span class="w-2 h-2 rounded-full shrink-0"
+                            :class="getStatusClass(assetStatuses[String(depId)] || 'waiting')"></span>
+                      资产 #<span x-text="depId"></span>
+                      <button @click="removeDrawerDep(slotInfo.asset_id, depId)"
+                              class="text-gray-400 hover:text-red-500 ml-0.5">✕</button>
+                    </span>
+                  </template>
+                </div>
+              </div>
 
               <!-- 生成历史缩略 -->
               <template x-if="(assetDetails[slotInfo.asset_id]?.asset_paths || []).flat().length > 0">
@@ -409,54 +462,152 @@
     </div>
   </div>
 
-  <!-- 依赖选择子弹窗（z-[60] 叠在新建弹窗 z-50 之上） -->
+  <!-- 依赖选择弹窗（多级：表 → 槽位 → 记录列表，z-[60] 叠在 z-50 之上） -->
   <div x-show="depPicker.show" x-cloak
        class="fixed inset-0 bg-black/50 flex items-center justify-center z-[60] p-4">
-    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[80vh] flex flex-col">
+    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col">
+
+      <!-- 标题栏 -->
       <div class="flex items-center justify-between px-5 py-3 border-b border-gray-100 shrink-0">
         <h3 class="font-semibold text-gray-900">
-          选择外部依赖
-          <span class="text-sm font-normal text-gray-500 ml-1">
-            — <span x-text="depPicker.slotName"></span>
-          </span>
+          选择依赖资产
+          <span class="text-sm font-normal text-gray-500 ml-1"
+                x-text="depPicker.slotName ? `— ${depPicker.slotName}` : ''"></span>
         </h3>
         <button @click="depPicker.show=false" class="text-gray-400 hover:text-gray-600 text-xl leading-none">✕</button>
       </div>
-      <div class="flex-1 overflow-y-auto px-5 py-3 space-y-4">
-        <template x-if="assetsForDeps.length === 0">
-          <p class="text-sm text-gray-400 text-center py-8">其他表暂无可选资产</p>
+
+      <!-- 第一行：关系表选择 -->
+      <div class="px-5 pt-3 pb-2.5 border-b border-gray-100 shrink-0">
+        <div class="text-xs text-gray-400 font-medium mb-2">关系表</div>
+        <div class="flex flex-wrap gap-2">
+          <template x-for="tbl in assetsForDeps" :key="tbl.display_name">
+            <button @click="depPicker.selectedTable = tbl.display_name; depPicker.selectedSlot = null"
+                    class="px-3 py-1 rounded-lg text-xs font-medium transition-colors"
+                    :class="depPicker.selectedTable === tbl.display_name
+                             ? 'bg-indigo-600 text-white shadow-sm'
+                             : 'bg-gray-100 text-gray-600 hover:bg-gray-200'">
+              <span x-text="tbl.display_name"></span>
+              <span class="ml-1 opacity-60" x-text="`(${tbl.records.length})`"></span>
+            </button>
+          </template>
+          <template x-if="assetsForDeps.length === 0">
+            <span class="text-xs text-gray-400 py-1">其他表暂无记录</span>
+          </template>
+        </div>
+      </div>
+
+      <!-- 第二行：插槽筛选（选中关系表后出现） -->
+      <div x-show="depPicker.selectedTable"
+           class="px-5 pt-2.5 pb-2 border-b border-gray-100 shrink-0 flex flex-wrap gap-2 items-center">
+        <span class="text-xs text-gray-400 font-medium mr-1">插槽</span>
+        <button @click="depPicker.selectedSlot = null"
+                class="px-2.5 py-0.5 rounded-lg text-xs font-medium transition-colors"
+                :class="depPicker.selectedSlot === null
+                         ? 'bg-indigo-100 text-indigo-700 border border-indigo-300'
+                         : 'bg-gray-100 text-gray-500 hover:bg-gray-200'">
+          全部
+        </button>
+        <template x-for="sn in getDepPickerSlots(depPicker.selectedTable)" :key="sn">
+          <button @click="depPicker.selectedSlot = sn"
+                  class="px-2.5 py-0.5 rounded-lg text-xs font-medium transition-colors"
+                  :class="depPicker.selectedSlot === sn
+                           ? 'bg-indigo-100 text-indigo-700 border border-indigo-300'
+                           : 'bg-gray-100 text-gray-500 hover:bg-gray-200'"
+                  x-text="sn">
+          </button>
         </template>
-        <template x-for="tbl in assetsForDeps" :key="tbl.display_name">
-          <div>
-            <div class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2"
-                 x-text="tbl.display_name"></div>
-            <template x-for="rec in tbl.records" :key="rec.id">
-              <div class="mb-3">
-                <div class="text-xs text-gray-600 font-medium mb-1.5"
-                     x-text="`${rec.name}  /  ${rec.node_name}`"></div>
-                <div class="flex flex-wrap gap-2">
-                  <template x-for="slot in rec.slots" :key="slot.asset_id">
-                    <label class="flex items-center gap-1.5 cursor-pointer text-xs
-                                  px-2.5 py-1.5 rounded-lg border transition-colors"
-                           :class="createForm.slots[depPicker.slotName]?.extra_deps.includes(slot.asset_id)
-                                    ? 'bg-indigo-50 border-indigo-400 text-indigo-700'
-                                    : 'border-gray-200 text-gray-600 hover:border-indigo-300'">
-                      <input type="checkbox"
-                             :checked="createForm.slots[depPicker.slotName]?.extra_deps.includes(slot.asset_id)"
-                             @change="toggleDep(depPicker.slotName, slot.asset_id)"
-                             class="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 w-3 h-3">
-                      <span x-text="slot.slot_name"></span>
-                      <span class="w-2 h-2 rounded-full ml-0.5"
-                            :class="getStatusClass(slot.status)"></span>
-                    </label>
-                  </template>
-                </div>
-              </div>
-            </template>
+      </div>
+
+      <!-- 记录列表 -->
+      <div class="flex-1 overflow-y-auto px-5 py-3 space-y-3">
+        <template x-if="!depPicker.selectedTable">
+          <p class="text-sm text-gray-400 text-center py-10">请先在上方选择关系表</p>
+        </template>
+        <template x-if="depPicker.selectedTable && getDepPickerRecords().length === 0">
+          <p class="text-sm text-gray-400 text-center py-10">该表暂无记录</p>
+        </template>
+        <template x-for="rec in getDepPickerRecords()" :key="rec.id">
+          <div class="border border-gray-100 rounded-xl overflow-hidden">
+            <!-- 记录名称行 -->
+            <div class="flex items-center gap-2 px-3.5 py-2 bg-gray-50">
+              <span class="font-medium text-sm text-gray-800" x-text="rec.name"></span>
+              <span class="text-gray-300 text-xs">/</span>
+              <span class="text-xs text-gray-500" x-text="rec.node_name"></span>
+            </div>
+            <!-- 插槽资产（带缩略图） -->
+            <div class="flex flex-wrap gap-4 px-3.5 py-3">
+              <template x-for="slot in rec.slots" :key="slot.asset_id">
+                <label class="flex items-center gap-2.5 cursor-pointer group select-none">
+                  <input type="checkbox"
+                         :checked="isDepSelected(slot.asset_id)"
+                         @change="toggleDepInPicker(slot.asset_id)"
+                         class="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 w-3.5 h-3.5 shrink-0 mt-0.5">
+                  <!-- 圆形缩略图 -->
+                  <div class="relative shrink-0">
+                    <!-- 图片 -->
+                    <template x-if="slot.asset_type === '图片' && slot.active_path">
+                      <img :src="getFileUrl(slot.active_path)"
+                           class="w-10 h-10 rounded-full object-cover border-2 transition-colors cursor-pointer"
+                           :class="isDepSelected(slot.asset_id) ? 'border-indigo-400' : 'border-gray-200 group-hover:border-gray-400'"
+                           @click.prevent.stop="previewInfo = { asset_id: slot.asset_id, asset_type: slot.asset_type, slotName: slot.slot_name, direct_url: getFileUrl(slot.active_path) }">
+                    </template>
+                    <!-- 视频 -->
+                    <template x-if="slot.asset_type === '视频' && slot.active_path">
+                      <div class="w-10 h-10 rounded-full overflow-hidden border-2 cursor-pointer bg-gray-100
+                                  flex items-center justify-center relative transition-colors"
+                           :class="isDepSelected(slot.asset_id) ? 'border-indigo-400' : 'border-gray-200 group-hover:border-gray-400'"
+                           @click.prevent.stop="previewInfo = { asset_id: slot.asset_id, asset_type: slot.asset_type, slotName: slot.slot_name, direct_url: getFileUrl(slot.active_path) }">
+                        <video :src="getFileUrl(slot.active_path)" class="w-full h-full object-cover" muted preload="metadata"></video>
+                        <div class="absolute inset-0 bg-black/25 flex items-center justify-center">
+                          <svg class="w-3.5 h-3.5 text-white drop-shadow" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                        </div>
+                      </div>
+                    </template>
+                    <!-- 音频 / 音色卡 -->
+                    <template x-if="(slot.asset_type === '音频' || slot.asset_type === '音色卡') && slot.active_path">
+                      <div class="w-10 h-10 rounded-full border-2 cursor-pointer bg-indigo-50
+                                  flex items-center justify-center transition-colors"
+                           :class="isDepSelected(slot.asset_id) ? 'border-indigo-400' : 'border-gray-200 group-hover:border-gray-400'"
+                           @click.prevent.stop="playDepAudio(slot)">
+                        <svg class="w-4 h-4 text-indigo-400" fill="currentColor" viewBox="0 0 24 24">
+                          <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/>
+                        </svg>
+                      </div>
+                    </template>
+                    <!-- 无产出 / 其他类型 -->
+                    <template x-if="!slot.active_path">
+                      <div class="w-10 h-10 rounded-full border-2 bg-gray-50
+                                  flex items-center justify-center transition-colors"
+                           :class="isDepSelected(slot.asset_id) ? 'border-indigo-400' : 'border-gray-200'">
+                        <div class="w-3 h-3 rounded-full" :class="getStatusClass(slot.status)"></div>
+                      </div>
+                    </template>
+                    <!-- 已选角标 -->
+                    <div x-show="isDepSelected(slot.asset_id)"
+                         class="absolute -top-0.5 -right-0.5 w-4 h-4 bg-indigo-600 rounded-full
+                                flex items-center justify-center shadow">
+                      <svg class="w-2.5 h-2.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/>
+                      </svg>
+                    </div>
+                  </div>
+                  <!-- 插槽名 + 状态 -->
+                  <div class="text-xs">
+                    <div class="text-gray-700 font-medium leading-tight" x-text="slot.slot_name"></div>
+                    <div class="text-gray-400 leading-tight" x-text="slot.status"></div>
+                  </div>
+                </label>
+              </template>
+            </div>
           </div>
         </template>
       </div>
-      <div class="px-5 py-3 border-t border-gray-100 shrink-0 flex justify-end">
+
+      <!-- 底部 -->
+      <div class="px-5 py-3 border-t border-gray-100 shrink-0 flex items-center justify-between">
+        <span class="text-xs text-gray-400"
+              x-text="depPickerSelectedCount() > 0 ? `已选 ${depPickerSelectedCount()} 项` : ''"></span>
         <button @click="depPicker.show=false"
                 class="px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700">
           完成
@@ -495,15 +646,15 @@
       </div>
       <div class="p-4 flex items-center justify-center bg-gray-50 min-h-32">
         <template x-if="previewInfo?.asset_type==='图片'">
-          <img :src="getActiveFileUrl(previewInfo.asset_id)"
+          <img :src="previewInfo.direct_url || getActiveFileUrl(previewInfo.asset_id)"
                class="max-w-full max-h-[70vh] rounded-lg object-contain shadow">
         </template>
         <template x-if="previewInfo?.asset_type==='视频'">
-          <video :src="getActiveFileUrl(previewInfo.asset_id)" controls
+          <video :src="previewInfo.direct_url || getActiveFileUrl(previewInfo.asset_id)" controls
                  class="max-w-full max-h-[70vh] rounded-lg"></video>
         </template>
         <template x-if="previewInfo?.asset_type==='音频' || previewInfo?.asset_type==='音色卡'">
-          <audio :src="getActiveFileUrl(previewInfo.asset_id)" controls class="w-full"></audio>
+          <audio :src="previewInfo.direct_url || getActiveFileUrl(previewInfo.asset_id)" controls class="w-full"></audio>
         </template>
         <template x-if="previewInfo?.asset_type==='文本'">
           <pre class="text-sm text-gray-700 whitespace-pre-wrap max-h-[60vh] overflow-y-auto"
@@ -547,14 +698,23 @@ function tablePage() {
     createParentName: '',
     createForm: { name: '', node_name: '', slots: {} },
     assetsForDeps: [],        // 其他表的资产，供依赖选择
-    depPicker: { show: false, slotName: null },
+    depPicker: {
+      show: false,
+      slotName: null,
+      mode: 'create',          // 'create' | 'drawer'
+      drawerAssetId: null,
+      selectedTable: null,
+      selectedSlot: null,
+    },
+    compactMode: true,
     selectedRoots: [],
     statusFilter: '',
     deleteTarget: null,
-    previewInfo: null,        // {asset_id, asset_type, slotName}
+    previewInfo: null,        // {asset_id, asset_type, slotName, direct_url?}
     assetStatuses: {},        // {asset_id_str: status}
     assetDetails: {},         // {asset_id: full_asset_dict}
     allModels: {},            // {asset_type: [models]}
+    _depAudio: null,          // 当前播放的音频元素
 
     // ── 初始化 ───────────────────────────────────────────────────
     async init() {
@@ -853,6 +1013,10 @@ function tablePage() {
       this.assetsForDeps = await API.get(
         `/api/${_PROJECT}/assets_for_deps?exclude=${encodeURIComponent(_TABLE_DISPLAY)}`
       ).catch(() => []) || [];
+      // 自动选中第一个关系表
+      if (this.assetsForDeps.length > 0 && !this.depPicker.selectedTable) {
+        this.depPicker.selectedTable = this.assetsForDeps[0].display_name;
+      }
     },
 
     openCreateRoot() {
@@ -880,7 +1044,89 @@ function tablePage() {
     },
 
     openDepPicker(slotName) {
-      this.depPicker = { show: true, slotName };
+      this.depPicker = {
+        show: true,
+        slotName,
+        mode: 'create',
+        drawerAssetId: null,
+        selectedTable: this.assetsForDeps[0]?.display_name || null,
+        selectedSlot: null,
+      };
+    },
+
+    openDrawerDepPicker(assetId, slotName) {
+      this.loadAssetsForDeps();
+      this.depPicker = {
+        show: true,
+        slotName,
+        mode: 'drawer',
+        drawerAssetId: assetId,
+        selectedTable: this.assetsForDeps[0]?.display_name || null,
+        selectedSlot: null,
+      };
+    },
+
+    async removeDrawerDep(assetId, depId) {
+      const asset = this.assetDetails[assetId];
+      if (!asset) return;
+      const deps = (asset.dependencies || []).filter(d => d !== depId);
+      await this.updateAssetField(assetId, 'dependencies', deps);
+    },
+
+    // ── 依赖选择器辅助方法 ────────────────────────────────────────
+    getDepPickerSlots(tableName) {
+      const tbl = this.assetsForDeps.find(t => t.display_name === tableName);
+      if (!tbl) return [];
+      const slots = new Set();
+      for (const rec of tbl.records) {
+        for (const s of rec.slots) slots.add(s.slot_name);
+      }
+      return [...slots];
+    },
+
+    getDepPickerRecords() {
+      if (!this.depPicker.selectedTable) return [];
+      const tbl = this.assetsForDeps.find(t => t.display_name === this.depPicker.selectedTable);
+      if (!tbl) return [];
+      if (!this.depPicker.selectedSlot) return tbl.records;
+      return tbl.records
+        .map(rec => ({ ...rec, slots: rec.slots.filter(s => s.slot_name === this.depPicker.selectedSlot) }))
+        .filter(rec => rec.slots.length > 0);
+    },
+
+    isDepSelected(assetId) {
+      if (this.depPicker.mode === 'drawer') {
+        return (this.assetDetails[this.depPicker.drawerAssetId]?.dependencies || []).includes(assetId);
+      }
+      return (this.createForm.slots[this.depPicker.slotName]?.extra_deps || []).includes(assetId);
+    },
+
+    async toggleDepInPicker(assetId) {
+      if (this.depPicker.mode === 'drawer') {
+        const aid = this.depPicker.drawerAssetId;
+        const asset = this.assetDetails[aid];
+        if (!asset) return;
+        const deps = [...(asset.dependencies || [])];
+        const idx = deps.indexOf(assetId);
+        if (idx === -1) deps.push(assetId); else deps.splice(idx, 1);
+        await this.updateAssetField(aid, 'dependencies', deps);
+      } else {
+        this.toggleDep(this.depPicker.slotName, assetId);
+      }
+    },
+
+    depPickerSelectedCount() {
+      if (this.depPicker.mode === 'drawer') {
+        return (this.assetDetails[this.depPicker.drawerAssetId]?.dependencies || []).length;
+      }
+      return (this.createForm.slots[this.depPicker.slotName]?.extra_deps || []).length;
+    },
+
+    playDepAudio(slot) {
+      if (this._depAudio) { this._depAudio.pause(); this._depAudio = null; }
+      const audio = new Audio(this.getFileUrl(slot.active_path));
+      this._depAudio = audio;
+      audio.play().catch(() => {});
     },
 
     toggleDep(slotName, assetId) {

@@ -149,11 +149,26 @@ def get_assets_for_deps(project_name: str):
                     for aid in ids:
                         asset = get_asset(project_name, aid)
                         if asset:
+                            # 计算当前激活文件路径（供缩略图使用）
+                            active_path = ""
+                            if asset.get("status") == "success":
+                                try:
+                                    import json as _json
+                                    paths = asset.get("asset_paths") or [[]]
+                                    if isinstance(paths, str):
+                                        paths = _json.loads(paths)
+                                    ai = asset.get("active_index") or [0, 0]
+                                    if isinstance(ai, str):
+                                        ai = _json.loads(ai)
+                                    active_path = list(paths[ai[0]][ai[1]].values())[0]
+                                except Exception:
+                                    pass
                             slots_list.append({
                                 "slot_name": slot_name,
                                 "asset_id": aid,
                                 "asset_type": asset["asset_type"],
                                 "status": asset["status"],
+                                "active_path": active_path,
                             })
             table_records.append({
                 "id": rec["id"],
