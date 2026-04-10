@@ -55,7 +55,7 @@ def table_page(table_display_name: str):
         enriched_records.append(rec)
 
     # 构建树结构：根节点 + 子节点链
-    chains = _build_chains(enriched_records)
+    chains = _build_chains(enriched_records, table_config)
 
     return render_template("relation_table.html",
                            current_project=current,
@@ -68,24 +68,40 @@ def table_page(table_display_name: str):
                            workflow_config=workflow_config)
 
 
-def _build_chains(records: list[dict]) -> list[list[dict]]:
-    """将平铺的记录列表构建为横排链条列表。"""
-    id_map = {r["id"]: r for r in records}
+def _build_chains(records: list[dict], table_config: dict) -> list[list[dict]]:
+    """
+    将平铺的记录列表构建为横排链条列表。
+
+    strict 模式：root → child → grandchild（单链）
+    parallel 模式：root + [所有 parent_id=root.id 的子节点]（平铺）
+    """
+    chain_mode = table_config.get("chain_mode", "strict")
     root_nodes = [r for r in records if r.get("parent_id") is None]
     chains = []
-    for root in root_nodes:
-        chain = [root]
-        # 收集所有 parent_id = root.id 或沿链的子节点
-        # 链条模式：每个节点只有一个子
-        current = root
-        while True:
-            children = [r for r in records
-                        if r.get("parent_id") == current["id"]]
-            if not children:
-                break
-            # strict 模式：第一个子节点
-            child = children[0]
-            chain.append(child)
-            current = child
-        chains.append(chain)
+
+    if chain_mode == "parallel":
+        for root in root_nodes:
+            children = sorted(
+                [r for r in records if r.get("parent_id") == root["id"]],
+                key=lambda x: x["id"]
+            )
+            chains.append([root] + children)
+    else:  # strict
+        for root in root_nodes:
+            chain = [root]
+            current = root
+            visited = {root["id"]}
+            while True:
+                children = [r for r in records
+                            if r.get("parent_id") == current["id"]]
+                if not children:
+                    break
+                child = children[0]
+                if child["id"] in visited:  # 防止循环
+                    break
+                visited.add(child["id"])
+                chain.append(child)
+                current = child
+            chains.append(chain)
+
     return chains

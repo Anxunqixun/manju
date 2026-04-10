@@ -141,6 +141,12 @@ def create_table_record(project_name: str, table_name: str):
     node_name = (data.get("node_name") or "").strip()
     parent_id = data.get("parent_id")
 
+    # 子节点：name 继承自父节点，不要求前端传入
+    if not name and parent_id is not None:
+        parent_rec = get_relation_record(project_name, table_name, int(parent_id))
+        if parent_rec:
+            name = parent_rec.get("name") or ""
+
     if not name:
         return jsonify({"error": "name 不能为空"}), 400
 
@@ -223,16 +229,30 @@ def update_table_record(project_name: str, table_name: str, record_id: int):
 
 @bp.route("/<project_name>/tables/<table_name>/<int:record_id>", methods=["DELETE"])
 def delete_table_record(project_name: str, table_name: str, record_id: int):
-    """删除关系记录，清理绑定资产，并从其他资产的 dependencies 中移除引用。"""
-    rec = get_relation_record(project_name, table_name, record_id)
-    if rec is None:
-        return jsonify({"error": "记录不存在"}), 404
+    """删除关系记录（及其整条链上的所有子节点），清理绑定资产。"""
+    import shutil
 
-    # 收集本记录绑定的所有 asset_id
-    bound_ids = set()
-    for slot_entry in (rec.get("ref_ids") or []):
-        for slot_name, ids in slot_entry.items():
-            bound_ids.update(ids)
+    # 递归收集以 record_id 为根的链上所有记录 id
+    all_records = list_relation_records(project_name, table_name)
+
+    def collect_chain_ids(rid: int) -> list[int]:
+        result = [rid]
+        for r in all_records:
+            if r.get("parent_id") == rid:
+                result.extend(collect_chain_ids(r["id"]))
+        return result
+
+    chain_record_ids = collect_chain_ids(record_id)
+
+    # 收集链上所有记录绑定的 asset_id
+    bound_ids: set[int] = set()
+    for cid in chain_record_ids:
+        rec = get_relation_record(project_name, table_name, cid)
+        if rec is None:
+            continue
+        for slot_entry in (rec.get("ref_ids") or []):
+            for slot_name, ids in slot_entry.items():
+                bound_ids.update(ids)
 
     # 从其他资产的 dependencies 中移除这些 id
     all_assets = list_assets(project_name)
@@ -248,11 +268,13 @@ def delete_table_record(project_name: str, table_name: str, record_id: int):
     for aid in bound_ids:
         asset_dir = PROJECTS_DIR / project_name / "assets" / str(aid)
         if asset_dir.exists():
-            import shutil
             shutil.rmtree(asset_dir)
         delete_asset(project_name, aid)
 
-    delete_relation_record(project_name, table_name, record_id)
+    # 删除链上所有关系记录（先删子节点，再删父节点）
+    for cid in reversed(chain_record_ids):
+        delete_relation_record(project_name, table_name, cid)
+
     return jsonify({"ok": True})
 
 
